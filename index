@@ -1,0 +1,287 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>彈幕生存</title>
+    <style>
+        * {
+            box-sizing: border-box;
+            -webkit-tap-highlight-color: transparent;
+        }
+        body {
+            margin: 0;
+            padding: 0;
+            background-color: #000;
+            color: #fff;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
+            overflow: hidden;
+            touch-action: none;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+        }
+        #game-container {
+            position: relative;
+            width: 100%;
+            height: 100%;
+            max-width: 600px;
+            background: #000;
+        }
+        canvas {
+            display: block;
+            width: 100%;
+            height: 100%;
+        }
+        .overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            background: rgba(0, 0, 0, 0.85);
+            z-index: 10;
+        }
+        h1 {
+            font-size: 2.5rem;
+            margin-bottom: 30px;
+            color: #00FBFF;
+            text-shadow: 0 0 10px rgba(0, 251, 255, 0.5);
+        }
+        .menu-btn {
+            width: 200px;
+            padding: 15px;
+            margin: 10px;
+            font-size: 1.2rem;
+            font-weight: bold;
+            border: 2px solid #fff;
+            background: transparent;
+            color: #fff;
+            border-radius: 50px;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        .menu-btn:active {
+            background: #fff;
+            color: #000;
+            transform: scale(0.95);
+        }
+        .btn-eason {
+            border-color: #ff3333;
+            color: #ff3333;
+        }
+        .btn-eason:active {
+            background: #ff3333;
+            color: #fff;
+        }
+        #score-display {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            font-size: 1.2rem;
+            font-weight: bold;
+            pointer-events: none;
+            z-index: 5;
+        }
+        #game-over-ui {
+            display: none;
+        }
+    </style>
+</head>
+<body>
+
+<div id="game-container">
+    <div id="score-display">分數: 0</div>
+    
+    <!-- 難度選單 -->
+    <div id="menu-ui" class="overlay">
+        <h1>選擇難度</h1>
+        <button class="menu-btn" onclick="startGame('Easy')">簡單 (Easy)</button>
+        <button class="menu-btn" onclick="startGame('Medium')">普通 (Medium)</button>
+        <button class="menu-btn" onclick="startGame('Hard')">困難 (Hard)</button>
+        <button class="menu-btn btn-eason" onclick="startGame('Eason陳')">Eason陳</button>
+    </div>
+
+    <!-- 結算畫面 -->
+    <div id="game-over-ui" class="overlay">
+        <h1 id="over-title">GAME OVER</h1>
+        <p id="final-score" style="font-size: 1.5rem; margin-bottom: 30px;">最後得分: 0</p>
+        <button class="menu-btn" onclick="showMenu()">重新挑戰</button>
+    </div>
+
+    <canvas id="gameCanvas"></canvas>
+</div>
+
+<script>
+    const canvas = document.getElementById('gameCanvas');
+    const ctx = canvas.getContext('2d');
+    const scoreElement = document.getElementById('score-display');
+    const menuUI = document.getElementById('menu-ui');
+    const gameOverUI = document.getElementById('game-over-ui');
+    const finalScoreText = document.getElementById('final-score');
+    const overTitleText = document.getElementById('over-title');
+
+    // 遊戲參數
+    let isRunning = false;
+    let score = 0;
+    let speedMultiplier = 1.0;
+    let bullets = [];
+    let player = { x: 0, y: 0, r: 22 };
+    let bulletRadius = 14;
+    let currentDiff = "Easy";
+    let spawnTimer = null;
+
+    const difficulties = {
+        "Easy": { interval: 220, speed: 5, count: 1 },
+        "Medium": { interval: 160, speed: 8, count: 1 },
+        "Hard": { interval: 110, speed: 12, count: 1 },
+        "Eason陳": { interval: 55, speed: 17, count: 1 }
+    };
+
+    // 初始化畫布大小
+    function resize() {
+        canvas.width = canvas.offsetWidth;
+        canvas.height = canvas.offsetHeight;
+        player.x = canvas.width / 2;
+        player.y = canvas.height - 100;
+    }
+    window.addEventListener('resize', resize);
+    resize();
+
+    // 控制邏輯 (支援滑鼠與觸控)
+    function handleInput(e) {
+        if (!isRunning) return;
+        let clientX, clientY;
+        if (e.type.includes('touch')) {
+            clientX = e.touches[0].clientX;
+            clientY = e.touches[0].clientY;
+        } else {
+            clientX = e.clientX;
+            clientY = e.clientY;
+        }
+        
+        const rect = canvas.getBoundingClientRect();
+        player.x = clientX - rect.left;
+        player.y = clientY - rect.top;
+    }
+
+    canvas.addEventListener('mousemove', handleInput);
+    canvas.addEventListener('touchmove', (e) => {
+        handleInput(e);
+        e.preventDefault();
+    }, { passive: false });
+
+    function startGame(diff) {
+        currentDiff = diff;
+        menuUI.style.display = 'none';
+        gameOverUI.style.display = 'none';
+        
+        isRunning = true;
+        score = 0;
+        speedMultiplier = 1.0;
+        bullets = [];
+        
+        resize();
+        spawnBullets();
+        requestAnimationFrame(gameLoop);
+    }
+
+    function showMenu() {
+        gameOverUI.style.display = 'none';
+        menuUI.style.display = 'flex';
+    }
+
+    function spawnBullets() {
+        if (!isRunning) return;
+
+        const config = difficulties[currentDiff];
+        const count = config.count;
+        const baseSpeed = config.speed * speedMultiplier;
+
+        for (let i = 0; i < count; i++) {
+            bullets.push({
+                x: Math.random() * (canvas.width - 40) + 20,
+                y: -30,
+                r: bulletRadius,
+                dy: baseSpeed,
+                dx: (Math.random() - 0.5) * 2 // 稍微有一點橫向位移
+            });
+        }
+
+        spawnTimer = setTimeout(spawnBullets, config.interval);
+    }
+
+    function gameLoop() {
+        if (!isRunning) return;
+
+        // 更新分數與加速
+        score += 1;
+        if (score % 200 === 0) {
+            speedMultiplier += 0.05;
+        }
+        scoreElement.innerText = `分數: ${score}`;
+
+        // 清空畫布
+        ctx.fillStyle = '#000';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+        // 繪製玩家
+        ctx.beginPath();
+        ctx.arc(player.x, player.y, player.r, 0, Math.PI * 2);
+        ctx.fillStyle = '#00FBFF';
+        ctx.shadowBlur = 15;
+        ctx.shadowColor = '#00FBFF';
+        ctx.fill();
+        ctx.strokeStyle = '#fff';
+        ctx.lineWidth = 3;
+        ctx.stroke();
+        ctx.shadowBlur = 0; // 重置發光
+
+        // 更新與繪製子彈
+        for (let i = bullets.length - 1; i >= 0; i--) {
+            let b = bullets[i];
+            b.y += b.dy;
+            b.x += b.dx;
+
+            // 繪製子彈
+            ctx.beginPath();
+            ctx.arc(b.x, b.y, b.r, 0, Math.PI * 2);
+            ctx.fillStyle = '#FFEE00';
+            ctx.fill();
+            ctx.strokeStyle = '#FF3333';
+            ctx.lineWidth = 2;
+            ctx.stroke();
+
+            // 碰撞檢測
+            const dist = Math.sqrt((b.x - player.x) ** 2 + (b.y - player.y) ** 2);
+            if (dist < (player.r + b.r) * 0.75) {
+                endGame();
+                return;
+            }
+
+            // 移除出界子彈
+            if (b.y > canvas.height + 50) {
+                bullets.splice(i, 1);
+            }
+        }
+
+        requestAnimationFrame(gameLoop);
+    }
+
+    function endGame() {
+        isRunning = false;
+        clearTimeout(spawnTimer);
+        
+        overTitleText.innerText = currentDiff === "Eason陳" ? "Eason陳，你輸了！" : "GAME OVER";
+        finalScoreText.innerText = `最後得分: ${score}`;
+        gameOverUI.style.display = 'flex';
+    }
+
+</script>
+</body>
+</html>
